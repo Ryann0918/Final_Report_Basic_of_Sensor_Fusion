@@ -1,0 +1,994 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ELEC-E8740 Sensor Fusion Project Report
+% Authors: Haoran Cao, Xingle Zhang
+% Using fphw template
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[
+	11pt, % Default font size
+]{fphw}
+
+% Template-specific packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{mathpazo}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{enumerate}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage[hidelinks]{hyperref}
+\usepackage{array}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{bm}
+\usepackage{tabularx}
+\usepackage{adjustbox}
+\usepackage{multicol,multirow}
+\usepackage{diagbox}
+\usepackage[flushleft]{threeparttable}
+\newcolumntype{M}[1]{>{\centering\arraybackslash}m{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}m{#1}}
+
+%----------------------------------------------------------------------------------------
+%	ASSIGNMENT INFORMATION
+%----------------------------------------------------------------------------------------
+
+\title{Final Group Project Report} % Assignment title
+\author{Haoran Cao, Xingle Zhang} % Student names
+\date{December 12, 2024} % Due date
+\institute{Aalto University} % Institute or school name
+\class{ELEC-E8740 - Basics of Sensor Fusion D} % Course or class name
+\professor{Simo Särkkä} % Professor or teacher in charge
+
+%----------------------------------------------------------------------------------------
+
+\begin{document}
+
+\maketitle % Output the assignment title, created automatically using the information in the custom commands above
+
+%----------------------------------------------------------------------------------------
+%	ABSTRACT
+%----------------------------------------------------------------------------------------
+
+\begin{abstract}
+\noindent This report presents the implementation and results of a sensor fusion system for tracking a DiddyBorg autonomous robot. The project consists of two main parts: sensor calibration (Part I) and localization/tracking algorithms (Part II). In Part I, we calibrated the Inertial Measurement Unit (IMU), camera module, and motor controller to establish accurate sensor models. In Part II, we developed three tracking approaches: camera-based static localization using QR code detection, dead reckoning with IMU and motor data, and sensor fusion through Particle Filtering with 2000 particles. The final Particle Filter implementation successfully fuses IMU odometry with camera measurements to achieve accurate position estimation with a mean position error of 2.60 cm in static localization tests. The tracking system demonstrates robust performance across three complete laps of a semi-elliptical track, validating the effectiveness of multi-sensor fusion for mobile robot localization.
+\end{abstract}
+
+%----------------------------------------------------------------------------------------
+%	TABLE OF CONTENTS
+%----------------------------------------------------------------------------------------
+
+\tableofcontents
+\newpage
+
+%----------------------------------------------------------------------------------------
+%	INTRODUCTION
+%----------------------------------------------------------------------------------------
+
+\section{Introduction}
+
+Mobile robot localization is a fundamental challenge in autonomous navigation systems. The ability to accurately estimate a robot's position and orientation in real-time is essential for path planning, obstacle avoidance, and task execution. This project addresses the localization problem using a multi-sensor fusion approach that combines inertial measurements, visual landmarks, and odometry data.
+
+\subsection{Project Overview}
+
+The objective of this project is to develop and validate a sensor fusion system for tracking a DiddyBorg rover-type robot operating in a controlled 121.5 cm × 121.5 cm environment. The robot is equipped with:
+\begin{itemize}
+    \item An Inertial Measurement Unit (IMU) providing accelerometer, gyroscope, and magnetometer readings
+    \item A camera module for detecting QR code landmarks with known global positions
+    \item Motor encoders for odometry measurements
+    \item An infrared (IR) line sensor for path following
+\end{itemize}
+
+The robot is programmed to follow a black line on a white surface, completing a semi-elliptical trajectory while we estimate its position using various sensor fusion techniques.
+
+\subsection{Project Structure}
+
+The project is divided into two main parts:
+
+\textbf{Part I: Sensor Modeling and Calibration} (Tasks 1-4) involves:
+\begin{enumerate}
+    \item Static IMU analysis to determine gyroscope bias and variance
+    \item Accelerometer calibration to estimate gain and bias parameters
+    \item Camera module calibration using pinhole projection model
+    \item Motor speed characterization at 30\% PWM input
+\end{enumerate}
+
+\textbf{Part II: Localization and Tracking} (Tasks 5-7) includes:
+\begin{enumerate}
+    \item Static localization using camera-based QR code detection
+    \item Dead reckoning trajectory estimation using IMU and motor data
+    \item Sensor fusion tracking using Extended Kalman Filter (EKF)
+\end{enumerate}
+
+\subsection{Coordinate Systems}
+
+Understanding the coordinate system transformations is crucial for this project. Three coordinate systems are involved:
+
+\begin{itemize}
+    \item \textbf{Global/Inertial Frame}: Fixed reference frame with origin at the bottom-left corner of the arena
+    \item \textbf{Robot/Camera Frame}: Right-hand coordinate system (x-forward, y-left, z-up)
+    \item \textbf{IMU Frame}: Different orientation (-x forward, -y right, z-up) requiring coordinate transformations
+\end{itemize}
+
+The camera coordinate system is parallel to the robot body frame, simplifying geometric calculations for vision-based measurements.
+
+%----------------------------------------------------------------------------------------
+%	PART I: SENSOR MODELING
+%----------------------------------------------------------------------------------------
+
+\section{Part I: Sensor Modeling and Calibration}
+
+This section describes the calibration procedures and results for each sensor modality. Accurate sensor models are essential for achieving reliable state estimation in Part II.
+
+%----------------------------------------------------------------------------------------
+\subsection{Task 1: Static IMU Experiment}
+
+\subsubsection{Objective}
+Determine the bias and variance of the gyroscope measurements when the robot is stationary. This establishes the baseline noise characteristics of the IMU.
+
+\subsubsection{Methodology}
+The robot was placed on a stable, horizontal surface for approximately 45 seconds while collecting IMU data at 20 Hz sampling rate. For each gyroscope axis (x, y, z), we computed:
+\begin{align}
+    \text{Bias}_i &= \frac{1}{N}\sum_{k=1}^{N} \omega_i(k), \quad i \in \{x, y, z\} \\
+    \text{Variance}_i &= \frac{1}{N-1}\sum_{k=1}^{N} (\omega_i(k) - \text{Bias}_i)^2
+\end{align}
+where $\omega_i(k)$ represents the gyroscope reading for axis $i$ at time step $k$, and $N$ is the total number of samples.
+
+\subsubsection{Results}
+
+The static IMU experiment yielded the following gyroscope parameters:
+
+\begin{table}[H]
+\centering
+\caption{Gyroscope Bias and Variance (Task 1)}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Parameter} & \textbf{X-axis} & \textbf{Y-axis} & \textbf{Z-axis} \\
+\midrule
+Bias (deg/s) & $-0.0324$ & $-0.2039$ & $0.1873$ \\
+Variance ((deg/s)$^2$) & $0.0414$ & $0.0477$ & $0.0756$ \\
+Std. Dev. (deg/s) & $0.2034$ & $0.2184$ & $0.2750$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{task1_gyroscope_analysis_converted.png}
+\caption{Task 1: Static IMU measurements showing gyroscope readings over time (top left), angular velocity distribution (top right), accelerometer readings (bottom left), and magnetometer readings (bottom right). The gyroscope exhibits zero-mean noise centered around the bias values, while the accelerometer correctly measures gravity ($\approx 1g$) in the z-axis.}
+\label{fig:task1}
+\end{figure}
+
+\subsubsection{Discussion}
+
+The results reveal several important characteristics:
+\begin{itemize}
+    \item The gyroscope bias is relatively small (< 0.21 deg/s) but non-negligible, particularly for the y and z axes
+    \item The z-axis exhibits the highest variance, which is typical for MEMS gyroscopes
+    \item The accelerometer correctly measures gravitational acceleration ($\approx 1.0165g$) in the z-axis, confirming proper sensor orientation
+    \item The magnetometer readings are stable, showing minimal drift
+\end{itemize}
+
+These bias values will be subtracted from all subsequent gyroscope measurements to improve heading estimation accuracy.
+
+%----------------------------------------------------------------------------------------
+\subsection{Task 2: Accelerometer Calibration}
+
+\subsubsection{Objective}
+Estimate the gain ($k_i$) and bias ($b_i$) parameters for each accelerometer axis using gravity as a reference.
+
+\subsubsection{Methodology}
+
+The accelerometer calibration exploits the fact that Earth's gravitational field provides a constant, known reference acceleration. The sensor model for each axis is:
+\begin{equation}
+    y_i = k_i \cdot a_i + b_i + r_i
+\end{equation}
+where $y_i$ is the measured acceleration, $a_i$ is the true acceleration, $k_i$ is the gain, $b_i$ is the bias, and $r_i$ is measurement noise.
+
+For calibration, the robot was positioned with each body axis aligned with gravity (both +1g and -1g orientations), yielding six distinct orientations: +z, -z, +x, -x, +y, -y. For each axis $i$:
+
+\begin{align}
+    k_i &= \frac{a_{\text{up}} - a_{\text{down}}}{2g} \\
+    b_i &= \frac{a_{\text{up}} + a_{\text{down}}}{2}
+\end{align}
+
+where $a_{\text{up}}$ and $a_{\text{down}}$ are the average readings when the axis is aligned upward and downward, respectively, and $g = 9.81$ m/s$^2$.
+
+\subsubsection{Results}
+
+\begin{table}[H]
+\centering
+\caption{Accelerometer Calibration Parameters (Task 2)}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Parameter} & \textbf{X-axis} & \textbf{Y-axis} & \textbf{Z-axis} \\
+\midrule
+Gain $k_i$ & $0.9975$ & $0.9929$ & $0.9961$ \\
+Bias $b_i$ (g) & $0.0136$ & $-0.0042$ & $0.0193$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{task2_accelerometer_calibration.png}
+\caption{Task 2: Accelerometer calibration showing raw readings across six orientations (top left), distribution of measurements (top right), 2D scatter plot of x-y acceleration colored by z-axis (bottom left), and acceleration magnitude verification (bottom right). The magnitude plot confirms that after calibration, $\|\bm{a}\| \approx 1g$ for all static orientations.}
+\label{fig:task2}
+\end{figure}
+
+\subsubsection{Discussion}
+
+The calibration results demonstrate:
+\begin{itemize}
+    \item All gain factors are very close to unity (0.993--0.998), indicating minimal scale error
+    \item Bias values are small (< 0.02g), suggesting good factory calibration
+    \item The acceleration magnitude plot shows that $\sqrt{a_x^2 + a_y^2 + a_z^2} \approx 0.9998g$ across all orientations, validating the calibration accuracy
+\end{itemize}
+
+These parameters will be applied to all subsequent accelerometer measurements to correct for systematic errors.
+
+%----------------------------------------------------------------------------------------
+\subsection{Task 3: Camera Module Calibration}
+
+\subsubsection{Objective}
+Determine the focal length ($f$) and distance bias ($b$) of the camera module using the pinhole projection model.
+
+\subsubsection{Methodology}
+
+The pinhole camera model relates the detected height of a QR code in the image plane to its distance from the camera:
+\begin{equation}
+    h = \frac{h_0 \cdot f}{d + b}
+\end{equation}
+where:
+\begin{itemize}
+    \item $h$ = detected height in pixels
+    \item $h_0$ = actual QR code height (11.5 cm)
+    \item $f$ = focal length in pixels
+    \item $d$ = measured distance from camera to wall
+    \item $b$ = bias accounting for camera offset and wall thickness
+\end{itemize}
+
+Rearranging this equation:
+\begin{equation}
+    d = \frac{h_0 \cdot f}{h} - b
+\end{equation}
+
+Taking the reciprocal:
+\begin{equation}
+    \frac{1}{h} = \frac{1}{h_0 \cdot f} \cdot d + \frac{b}{h_0 \cdot f}
+\end{equation}
+
+This yields a linear relationship between $1/h$ and $d$, where:
+\begin{itemize}
+    \item Slope = $\frac{1}{h_0 \cdot f}$, so $f = \frac{1}{\text{slope} \cdot h_0}$
+    \item Intercept = $\frac{b}{h_0 \cdot f}$, so $b = \text{intercept} \cdot h_0 \cdot f$
+\end{itemize}
+
+A single QR code was placed at varying distances (34.2 cm to 141.2 cm) and the detected height was recorded. Linear least-squares regression was applied to the $(d, 1/h)$ data.
+
+Additionally, the bias includes:
+\begin{itemize}
+    \item Camera pinhole to IR detector offset: 1.7 cm
+    \item Wall to wooden frame distance: 5 cm
+\end{itemize}
+
+\subsubsection{Results}
+
+Linear regression yielded:
+\begin{itemize}
+    \item Slope: $k = 6034.33$ cm$\cdot$pixels
+    \item Intercept: $3.42$ cm
+    \item $R^2 = 0.9997$ (excellent fit)
+\end{itemize}
+
+From these, we derive:
+\begin{align}
+    f &= \frac{k}{h_0} = \frac{6034.33}{11.5} = 524.72 \text{ pixels} \\
+    b &= \text{intercept} = 3.42 \text{ cm}
+\end{align}
+
+\begin{table}[H]
+\centering
+\caption{Camera Calibration Parameters (Task 3)}
+\begin{tabular}{lc}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Focal length $f$ & 524.72 pixels \\
+Distance bias $b$ & 3.42 cm \\
+$R^2$ coefficient & 0.9997 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{task3_camera_calibration.png}
+\caption{Task 3: Camera calibration showing linear regression of $1/h$ vs. distance (left) and the calibrated distance model (right). The excellent $R^2 = 0.9997$ indicates that the pinhole model accurately describes the camera geometry.}
+\label{fig:task3}
+\end{figure}
+
+\subsubsection{Discussion}
+
+The camera calibration demonstrates:
+\begin{itemize}
+    \item The pinhole model provides an excellent fit to the experimental data ($R^2 \approx 1.0$)
+    \item The focal length of 524.72 pixels is consistent with typical webcam specifications
+    \item The 3.42 cm bias accounts for physical offsets in the camera mounting
+    \item The model is valid over a wide range (34--141 cm), covering the entire arena
+\end{itemize}
+
+These parameters enable accurate distance and bearing measurements to QR codes for localization.
+
+%----------------------------------------------------------------------------------------
+\subsection{Task 4: Motor Speed Calibration}
+
+\subsubsection{Objective}
+Characterize the robot's linear velocity as a function of Pulse Width Modulation (PWM) input to the motors.
+
+\subsubsection{Methodology}
+
+The robot was commanded to move forward at 30\% PWM while its position was manually measured at 40 cm intervals using a tape measure. The time to traverse each segment was recorded. Speed was calculated as:
+\begin{equation}
+    v = \frac{\Delta d}{\Delta t}
+\end{equation}
+
+where $\Delta d = 40$ cm is the segment length and $\Delta t$ is the measured time interval.
+
+\subsubsection{Results}
+
+\begin{table}[H]
+\centering
+\caption{Motor Speed Calibration Results (Task 4)}
+\begin{tabular}{lc}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Average speed at 30\% PWM & 6.23 cm/s \\
+Estimated full speed (100\% PWM) & 20.77 cm/s \\
+Standard deviation & 0.34 cm/s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{task4_motor_speed.png}
+\caption{Task 4: Motor speed calibration showing cumulative distance vs. time (left) and speed per segment (right). The robot exhibits relatively consistent velocity after an initial acceleration phase, with mean speed of 6.23 cm/s at 30\% PWM.}
+\label{fig:task4}
+\end{figure}
+
+\subsubsection{Discussion}
+
+Key observations:
+\begin{itemize}
+    \item The first segment (0--40 cm) shows lower speed (4.43 cm/s), indicating an acceleration phase
+    \item After the initial segment, speed stabilizes around 6--7 cm/s
+    \item Speed variation (std = 0.34 cm/s) is relatively small, suggesting good motor control
+    \item Assuming linear PWM-to-velocity relationship, full-speed estimate is $\approx 20.77$ cm/s
+\end{itemize}
+
+This calibration provides the velocity input for the dead reckoning algorithm in Part II.
+
+%----------------------------------------------------------------------------------------
+%	PART II: LOCALIZATION AND TRACKING
+%----------------------------------------------------------------------------------------
+
+\section{Part II: Localization and Tracking}
+
+Building on the sensor models from Part I, this section implements three localization algorithms with increasing complexity: static camera-based localization, dead reckoning, and sensor fusion via EKF.
+
+%----------------------------------------------------------------------------------------
+\subsection{Task 5: Static Localization Using Camera}
+
+\subsubsection{Objective}
+Estimate the robot's position $(p_x, p_y)$ and heading $\psi$ in the global frame using only camera measurements of multiple QR codes with known positions.
+
+\subsubsection{Methodology}
+
+\paragraph{Measurement Model}
+For each detected QR code $i$ at known global position $(s_{x,i}, s_{y,i})$, the camera provides:
+\begin{itemize}
+    \item Detected height $h_i$ (pixels)
+    \item Center x-coordinate $C_{x,i}$ (pixels, relative to image center)
+\end{itemize}
+
+The nonlinear measurement model is:
+\begin{align}
+    h_i &= \frac{h_0 \cdot f}{d_i} \\
+    C_{x,i} &= f \cdot \tan(\phi_i)
+\end{align}
+
+where:
+\begin{align}
+    d_i &= \sqrt{(s_{x,i} - p_x)^2 + (s_{y,i} - p_y)^2} \\
+    \phi_i &= \arctan\left(\frac{s_{y,i} - p_y}{s_{x,i} - p_x}\right) - \psi
+\end{align}
+
+In vector form: $\bm{y} = g(\bm{x})$ where $\bm{x} = [p_x, p_y, \psi]^T$.
+
+\paragraph{Jacobian Derivation}
+For nonlinear least squares optimization (Levenberg-Marquardt), we need the Jacobian matrix $\bm{J}$. For each QR code $i$, the measurement vector is $[h_i, C_{x,i}]^T$, giving:
+
+\begin{align}
+    \frac{\partial h_i}{\partial p_x} &= \frac{h_0 f (s_{x,i} - p_x)}{d_i^3} \\
+    \frac{\partial h_i}{\partial p_y} &= \frac{h_0 f (s_{y,i} - p_y)}{d_i^3} \\
+    \frac{\partial h_i}{\partial \psi} &= 0 \\
+    \frac{\partial C_{x,i}}{\partial p_x} &= f \sec^2(\phi_i) \cdot \frac{-(s_{y,i} - p_y)}{d_i^2} \\
+    \frac{\partial C_{x,i}}{\partial p_y} &= f \sec^2(\phi_i) \cdot \frac{s_{x,i} - p_x}{d_i^2} \\
+    \frac{\partial C_{x,i}}{\partial \psi} &= -f \sec^2(\phi_i)
+\end{align}
+
+For $n$ detected QR codes, the Jacobian is a $2n \times 3$ matrix.
+
+\paragraph{Optimization}
+We solve the nonlinear weighted least squares problem:
+\begin{equation}
+    \hat{\bm{x}} = \arg\min_{\bm{x}} \sum_{i=1}^{n} \left[\bm{y}_i - g_i(\bm{x})\right]^T \bm{R}_i^{-1} \left[\bm{y}_i - g_i(\bm{x})\right]
+\end{equation}
+
+using the Levenberg-Marquardt algorithm with measurement covariance:
+\begin{equation}
+    \bm{R}_i = \begin{bmatrix} \sigma_h^2 & 0 \\ 0 & \sigma_{C_x}^2 \end{bmatrix} = \begin{bmatrix} 2.0^2 & 0 \\ 0 & 3.0^2 \end{bmatrix} \text{ pixels}^2
+\end{equation}
+
+The posterior covariance is estimated from the Jacobian at convergence:
+\begin{equation}
+    \bm{P} = \left(\bm{J}^T \bm{R}^{-1} \bm{J}\right)^{-1}
+\end{equation}
+
+\subsubsection{Results}
+
+The robot was positioned at true location $(59.5, 26.0)$ cm with heading $90°$ (facing north). The camera detected 9 QR codes simultaneously.
+
+\begin{table}[H]
+\centering
+\caption{Task 5: Static Localization Results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{State} & \textbf{True Value} & \textbf{Estimated} & \textbf{Error} \\
+\midrule
+$p_x$ (cm) & 59.50 & 62.00 & 2.50 \\
+$p_y$ (cm) & 26.00 & 26.72 & 0.72 \\
+$\psi$ (deg) & 90.00 & 90.00 & 0.00 \\
+\midrule
+Position error (cm) & -- & -- & 2.60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Posterior Uncertainty (Standard Deviations)}
+\begin{tabular}{lc}
+\toprule
+\textbf{State} & \textbf{Std. Dev.} \\
+\midrule
+$\sigma_{p_x}$ & 1.82 cm \\
+$\sigma_{p_y}$ & 0.49 cm \\
+$\sigma_{\psi}$ & 0.99$°$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{task5_final_result.png}
+\caption{Task 5: Static localization results showing estimated vs. true position (top left), measurement residuals for each QR code (top right), posterior covariance matrix (bottom left), and measurement vs. prediction scatter plot (bottom right). The algorithm achieves 2.60 cm position error.}
+\label{fig:task5}
+\end{figure}
+
+\subsubsection{Discussion}
+
+The results demonstrate:
+\begin{itemize}
+    \item Excellent position estimation with only 2.60 cm total error
+    \item Perfect heading estimation ($0°$ error), likely due to the symmetric geometry of detected QR codes
+    \item Higher uncertainty in x-direction (1.82 cm) than y-direction (0.49 cm), reflecting the QR code geometry along Wall 2
+    \item The Levenberg-Marquardt algorithm converged in 13 function evaluations
+    \item Measurement residuals are generally small (mean 1.59 pixels), with maximum residual of 4.22 pixels
+    \item The measurement vs. prediction plot shows excellent agreement (points near ideal line)
+\end{itemize}
+
+The covariance matrix reveals:
+\begin{equation}
+    \bm{P} = \begin{bmatrix}
+    3.31 & 0.12 & -0.31 \\
+    0.12 & 0.24 & 0.00 \\
+    -0.31 & 0.00 & 0.03
+    \end{bmatrix}
+\end{equation}
+
+The small off-diagonal terms indicate weak correlation between position and heading estimates, which is desirable.
+
+%----------------------------------------------------------------------------------------
+\subsection{Task 6: Dead Reckoning Using IMU}
+
+\subsubsection{Objective}
+Track the robot's trajectory using only IMU (gyroscope) and motor encoder data, without camera corrections. This establishes a baseline for comparing sensor fusion performance.
+
+\subsubsection{Methodology}
+
+\paragraph{Motion Model}
+We employ a quasi-constant turn rate model in continuous time:
+\begin{align}
+    \dot{p}_x(t) &= v(t) \cos(\phi(t)) \\
+    \dot{p}_y(t) &= v(t) \sin(\phi(t)) \\
+    \dot{\phi}(t) &= \omega_{\text{gyro}}(t) + w(t)
+\end{align}
+
+where:
+\begin{itemize}
+    \item $(p_x, p_y)$ = position in global frame
+    \item $\phi$ = heading angle
+    \item $v$ = linear velocity from motor encoders
+    \item $\omega_{\text{gyro}}$ = angular velocity from gyroscope (bias-corrected)
+    \item $w(t)$ = process noise
+\end{itemize}
+
+\paragraph{Discretization}
+Using Euler integration with time step $\Delta t$:
+\begin{align}
+    p_{x,k+1} &= p_{x,k} + v_k \cos(\phi_k) \Delta t \\
+    p_{y,k+1} &= p_{y,k} + v_k \sin(\phi_k) \Delta t \\
+    \phi_{k+1} &= \phi_k + \omega_k \Delta t
+\end{align}
+
+\paragraph{Velocity Estimation}
+From Task 4, we know that at 30\% PWM, $v = 6.23$ cm/s. For arbitrary PWM inputs:
+\begin{equation}
+    v_k = \frac{6.23}{0.30} \cdot \frac{\text{PWM}_{\text{left}} + \text{PWM}_{\text{right}}}{2}
+\end{equation}
+
+\paragraph{Gyroscope Processing}
+Raw gyroscope measurements are corrected for bias (from Task 1):
+\begin{equation}
+    \omega_k = \omega_{\text{raw},k} - b_z = \omega_{\text{raw},k} - 0.1873 \text{ deg/s}
+\end{equation}
+
+and converted to radians/s.
+
+\paragraph{Initial Conditions}
+From the project specification:
+\begin{itemize}
+    \item Initial position: $(p_x, p_y) = (43, 18)$ cm
+    \item Initial heading: $\phi_0 = 0°$ (facing east)
+\end{itemize}
+
+\subsubsection{Results}
+
+The robot completed 3 laps of the semi-elliptical track in approximately 3.34 minutes (203 seconds).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{task6_result.png}
+\caption{Task 6: Dead reckoning trajectory (left) showing the estimated path compared to the reference track, and heading angle evolution over time (right). The trajectory exhibits significant drift due to accumulated integration errors.}
+\label{fig:task6a}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{task6_result_change_pwm.png}
+\caption{Task 6: Alternative view of dead reckoning trajectory emphasizing the spiral drift pattern characteristic of uncorrected odometry.}
+\label{fig:task6b}
+\end{figure}
+
+\subsubsection{Discussion}
+
+Dead reckoning demonstrates classic failure modes:
+\begin{itemize}
+    \item \textbf{Heading drift}: The heading accumulates error over time, reaching $\approx 1100°$ instead of the expected $1080°$ (3 complete rotations)
+    \item \textbf{Position drift}: The trajectory spirals inward/outward due to compounding integration errors
+    \item \textbf{No absolute reference}: Without external corrections, even small biases in $\omega$ lead to unbounded error growth
+\end{itemize}
+
+The drift rate is approximately:
+\begin{equation}
+    \text{Heading error} = 1100° - 1080° = 20° \text{ over 193 seconds} \approx 0.10°/\text{s}
+\end{equation}
+
+This corresponds to a residual gyroscope bias of $\approx 0.10°$/s even after calibration, highlighting the limitations of pure dead reckoning.
+
+Despite the drift, the overall trajectory shape resembles the reference track, confirming that:
+\begin{itemize}
+    \item The motion model is appropriate
+    \item Velocity scaling from PWM is approximately correct
+    \item Gyroscope bias correction is partially effective
+\end{itemize}
+
+This motivates the need for sensor fusion with absolute position measurements from the camera.
+
+%----------------------------------------------------------------------------------------
+\subsection{Task 7: Sensor Fusion with Particle Filter}
+
+\subsubsection{Objective}
+Fuse IMU odometry (prediction) with camera QR code detections (measurement updates) using a Particle Filter to achieve accurate, drift-free tracking.
+
+\subsubsection{Methodology}
+
+\paragraph{State Vector}
+\begin{equation}
+    \bm{x}_k = \begin{bmatrix} p_x \\ p_y \\ \phi \end{bmatrix}_k
+\end{equation}
+
+\paragraph{Process Model}
+The discrete-time motion model from Task 6:
+\begin{equation}
+    \bm{x}_{k+1} = f(\bm{x}_k, \bm{u}_k) + \bm{w}_k
+\end{equation}
+
+where:
+\begin{align}
+    f(\bm{x}_k, \bm{u}_k) = \begin{bmatrix}
+        p_x + v_k \cos(\phi_k) \Delta t \\
+        p_y + v_k \sin(\phi_k) \Delta t \\
+        \phi_k + \omega_k \Delta t
+    \end{bmatrix}
+\end{align}
+
+and $\bm{u}_k = [v_k, \omega_k]^T$ is the control input.
+
+Process noise $\bm{w}_k$ is sampled from a Gaussian distribution with covariance:
+\begin{equation}
+    \bm{Q} = \begin{bmatrix}
+        \sigma_v^2 \cos^2(\phi) \Delta t^2 & \sigma_v^2 \cos(\phi)\sin(\phi) \Delta t^2 & 0 \\
+        \sigma_v^2 \cos(\phi)\sin(\phi) \Delta t^2 & \sigma_v^2 \sin^2(\phi) \Delta t^2 & 0 \\
+        0 & 0 & \sigma_\omega^2 \Delta t^2
+    \end{bmatrix}
+\end{equation}
+
+\paragraph{Measurement Model}
+When QR codes are detected, the measurement model from Task 5 applies:
+\begin{equation}
+    \bm{y}_k = g(\bm{x}_k) + \bm{v}_k
+\end{equation}
+
+For $n_k$ detected QR codes:
+\begin{equation}
+    \bm{y}_k = \begin{bmatrix} h_1 \\ C_{x,1} \\ h_2 \\ C_{x,2} \\ \vdots \\ h_{n_k} \\ C_{x,n_k} \end{bmatrix}
+\end{equation}
+
+with measurement noise covariance:
+\begin{equation}
+    \bm{R} = \text{diag}(\sigma_h^2, \sigma_{C_x}^2, \sigma_h^2, \sigma_{C_x}^2, \ldots)
+\end{equation}
+
+\paragraph{Particle Filter Algorithm}
+
+The Particle Filter represents the posterior distribution $p(\bm{x}_k | \bm{y}_{1:k})$ using a set of $N$ weighted particles $\{\bm{x}_k^{(i)}, w_k^{(i)}\}_{i=1}^{N}$, where $N = 2000$.
+
+\textbf{Initialization:}
+
+Sample initial particles from a Gaussian distribution centered at the known starting position:
+\begin{equation}
+    \bm{x}_0^{(i)} \sim \mathcal{N}(\bm{\mu}_0, \bm{P}_0), \quad w_0^{(i)} = \frac{1}{N}
+\end{equation}
+
+where $\bm{\mu}_0 = [43, 18, 0]^T$ and $\bm{P}_0$ is a small initial covariance.
+
+\textbf{Prediction Step:}
+
+For each particle $i = 1, \ldots, N$:
+\begin{align}
+    \bm{x}_{k+1}^{(i)} &= f(\bm{x}_k^{(i)}, \bm{u}_k) + \bm{w}_k^{(i)} \\
+    \bm{w}_k^{(i)} &\sim \mathcal{N}(\bm{0}, \bm{Q}_k)
+\end{align}
+
+This propagates each particle according to the motion model with added process noise.
+
+\textbf{Update Step (when camera measurements available):}
+
+For each particle, compute the likelihood of the measurement:
+\begin{equation}
+    p(\bm{y}_k | \bm{x}_k^{(i)}) = \frac{1}{(2\pi)^{n_k} |\bm{R}|^{1/2}} \exp\left(-\frac{1}{2}(\bm{y}_k - g(\bm{x}_k^{(i)}))^T \bm{R}^{-1} (\bm{y}_k - g(\bm{x}_k^{(i)}))\right)
+\end{equation}
+
+Update particle weights:
+\begin{equation}
+    \tilde{w}_k^{(i)} = w_{k-1}^{(i)} \cdot p(\bm{y}_k | \bm{x}_k^{(i)})
+\end{equation}
+
+Normalize weights:
+\begin{equation}
+    w_k^{(i)} = \frac{\tilde{w}_k^{(i)}}{\sum_{j=1}^{N} \tilde{w}_k^{(j)}}
+\end{equation}
+
+\textbf{State Estimation:}
+
+The state estimate is the weighted mean of all particles:
+\begin{equation}
+    \hat{\bm{x}}_k = \sum_{i=1}^{N} w_k^{(i)} \bm{x}_k^{(i)}
+\end{equation}
+
+\textbf{Resampling:}
+
+To prevent particle degeneracy, systematic resampling is performed when the effective sample size falls below a threshold:
+\begin{equation}
+    N_{\text{eff}} = \frac{1}{\sum_{i=1}^{N} (w_k^{(i)})^2} < N_{\text{threshold}}
+\end{equation}
+
+Resampling draws $N$ new particles from the current set with probability proportional to their weights, then resets all weights to $1/N$.
+
+\paragraph{Implementation Details}
+
+\textbf{Data Synchronization:}
+IMU and camera operate at different rates (IMU $\approx$ 20 Hz, camera $\approx$ 5 Hz). We:
+\begin{enumerate}
+    \item Perform prediction steps at every IMU timestamp
+    \item Perform update steps only when camera detections are available
+    \item Interpolate motor commands between motor log entries
+\end{enumerate}
+
+\textbf{Parameter Tuning:}
+After extensive testing, optimal parameters were:
+\begin{itemize}
+    \item Number of particles: $N = 2000$
+    \item Process noise: $\sigma_v = 2.0$ cm/s, $\sigma_\omega = 5.0°$/s
+    \item Measurement noise: $\sigma_h = 2.0$ px, $\sigma_{C_x} = 3.0$ px
+    \item Resampling threshold: $N_{\text{threshold}} = 0.5N = 1000$
+\end{itemize}
+
+\subsubsection{Results}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{task7_result.png}
+\caption{Task 7: Particle Filter sensor fusion results with 2000 particles. Top left: Full trajectory tracking showing excellent alignment with reference track. Top right: Heading evolution over time, correctly accumulating to $\approx 1080°$ for 3 complete laps. Bottom left: Position components over time showing periodic behavior. Bottom right: First loop detail demonstrating tracking accuracy.}
+\label{fig:task7}
+\end{figure}
+
+\subsubsection{Discussion}
+
+The Particle Filter sensor fusion achieves remarkable improvements over dead reckoning:
+
+\textbf{Trajectory Accuracy:}
+\begin{itemize}
+    \item The estimated trajectory closely follows the reference semi-elliptical track
+    \item No visible drift accumulation over 3 complete laps
+    \item Smooth transitions between straight and curved sections
+\end{itemize}
+
+\textbf{Heading Estimation:}
+\begin{itemize}
+    \item Final heading $\approx 1080°$ (exactly 3 rotations), compared to $1100°$ in Task 6
+    \item Camera updates effectively correct gyroscope drift
+    \item Heading uncertainty remains bounded (does not grow unbounded)
+\end{itemize}
+
+\textbf{Position Tracking:}
+\begin{itemize}
+    \item X and Y position plots show clear periodic structure matching the elliptical path
+    \item Position estimates remain within the 121.5 cm arena bounds
+    \item First loop detail shows accurate tracking from the start
+\end{itemize}
+
+\textbf{Filter Behavior:}
+\begin{itemize}
+    \item Prediction steps propagate all 2000 particles according to the motion model with process noise
+    \item Update steps weight particles based on measurement likelihood when QR codes are visible
+    \item Resampling prevents particle degeneracy by eliminating low-weight particles
+    \item The filter successfully handles varying numbers of QR code detections (1--8 codes per frame)
+\end{itemize}
+
+\textbf{Comparison Summary:}
+
+\begin{table}[H]
+\centering
+\caption{Tracking Performance Comparison}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Metric} & \textbf{Dead Reckoning} & \textbf{Particle Filter} \\
+\midrule
+Final heading error & $\sim 20°$ & $< 5°$ \\
+Position drift & Unbounded & Bounded \\
+Trajectory shape & Spiral & Accurate \\
+Robustness & Poor & Excellent \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Key Success Factors}
+
+The successful Particle Filter implementation required:
+\begin{enumerate}
+    \item \textbf{Sufficient particles}: Using $N = 2000$ particles ensures adequate representation of the posterior distribution
+    \item \textbf{Proper coordinate handling}: Ensuring camera measurements use center-offset coordinates, not raw pixel values
+    \item \textbf{Good initial state}: Initializing particles around the known starting position
+    \item \textbf{Balanced noise parameters}: Tuning $\sigma_h$ and $\sigma_{C_x}$ to prevent over-trusting unreliable camera data
+    \item \textbf{Effective resampling}: Systematic resampling when $N_{\text{eff}} < 1000$ prevents particle degeneracy
+\end{enumerate}
+
+\paragraph{Advantages of Particle Filter}
+
+The Particle Filter offers several benefits for this application:
+\begin{itemize}
+    \item \textbf{Handles nonlinearity}: No linearization required, unlike EKF—exact nonlinear measurement model is used directly
+    \item \textbf{Multimodal capability}: Can represent complex, non-Gaussian posterior distributions (though not needed here)
+    \item \textbf{Conceptual simplicity}: Straightforward Monte Carlo approximation of Bayesian filtering
+    \item \textbf{Robust to model errors}: Particle diversity provides robustness to modeling inaccuracies
+\end{itemize}
+
+\paragraph{Computational Considerations}
+
+The main trade-off is computational cost:
+\begin{itemize}
+    \item Each prediction step requires propagating 2000 particles
+    \item Each update step requires evaluating the nonlinear measurement function 2000 times
+    \item Resampling adds computational overhead but is necessary for performance
+    \item For this application with 20 Hz IMU and 5 Hz camera, the computational load is manageable
+    \item An EKF alternative would be more efficient but requires Jacobian calculations and linearization
+\end{itemize}
+
+%----------------------------------------------------------------------------------------
+%	CONCLUSION
+%----------------------------------------------------------------------------------------
+
+\section{Conclusion}
+
+This project successfully developed and validated a complete sensor fusion system for mobile robot localization. The work progressed systematically from sensor calibration through increasingly sophisticated estimation algorithms.
+
+\subsection{Key Achievements}
+
+\textbf{Part I: Sensor Calibration}
+\begin{itemize}
+    \item Characterized IMU noise (gyroscope std. dev. 0.20--0.28 deg/s)
+    \item Calibrated accelerometers with gains near unity and biases < 0.02g
+    \item Determined camera focal length (524.72 pixels) with $R^2 = 0.9997$
+    \item Measured robot velocity (6.23 cm/s at 30\% PWM)
+\end{itemize}
+
+\textbf{Part II: Localization Algorithms}
+\begin{itemize}
+    \item \textbf{Task 5}: Static localization achieved 2.60 cm position error using 9 QR codes
+    \item \textbf{Task 6}: Dead reckoning demonstrated characteristic drift ($\sim 20°$ heading error)
+    \item \textbf{Task 7}: Particle Filter sensor fusion eliminated drift, accurately tracking 3 complete laps
+\end{itemize}
+
+\subsection{Technical Insights}
+
+\paragraph{Sensor Modeling}
+Accurate sensor models are foundational for reliable estimation. The calibration procedures revealed:
+\begin{itemize}
+    \item MEMS sensors exhibit small but significant biases requiring correction
+    \item Simple models (linear for accelerometer, pinhole for camera) are often sufficient
+    \item Characterizing noise statistics enables optimal filtering
+\end{itemize}
+
+\paragraph{Dead Reckoning Limitations}
+Pure odometry inevitably drifts due to:
+\begin{itemize}
+    \item Integration of biased measurements
+    \item Wheel slip and motor inconsistencies
+    \item Discretization errors
+\end{itemize}
+
+Even with careful calibration, Task 6 showed $\sim 0.10°$/s residual heading drift—small but catastrophic over time.
+
+\paragraph{Sensor Fusion Benefits}
+The Particle Filter successfully combined complementary sensor modalities:
+\begin{itemize}
+    \item \textbf{IMU}: High-rate, continuous motion estimates (but drifts)
+    \item \textbf{Camera}: Absolute position references (but sparse, noisy)
+\end{itemize}
+
+This fusion achieved:
+\begin{itemize}
+    \item Bounded uncertainty (no drift)
+    \item High update rate (20 Hz predictions)
+    \item Robustness to intermittent measurements
+    \item No linearization errors (exact nonlinear model)
+\end{itemize}
+
+\paragraph{Implementation Challenges}
+Critical debugging lessons:
+\begin{enumerate}
+    \item \textbf{Coordinate systems matter}: Raw pixel coordinates vs. center-offset caused major errors initially
+    \item \textbf{Initial conditions are crucial}: Poor $\phi_0$ led to filter divergence
+    \item \textbf{Noise tuning is an art}: Overly optimistic $\sigma_h$ caused over-reliance on bad camera data
+    \item \textbf{Verification is essential}: Geometric checks of measurement models caught subtle bugs
+\end{enumerate}
+
+\subsection{Future Work}
+
+Potential improvements:
+\begin{itemize}
+    \item \textbf{Adaptive noise estimation}: Adjust $\bm{R}$ based on number of detected QR codes
+    \item \textbf{Outlier rejection}: Detect and discard anomalous camera measurements
+    \item \textbf{Magnetometer fusion}: Incorporate compass for absolute heading reference
+    \item \textbf{Higher-order motion models}: Account for acceleration dynamics
+    \item \textbf{SLAM extension}: Simultaneously estimate QR code positions (if unknown)
+\end{itemize}
+
+\subsection{Final Remarks}
+
+This project demonstrated that effective sensor fusion requires:
+\begin{enumerate}
+    \item Rigorous calibration and characterization
+    \item Understanding of each sensor's strengths and limitations
+    \item Appropriate mathematical models (motion and measurement)
+    \item Careful implementation and systematic debugging
+    \item Empirical tuning guided by physical insight
+\end{enumerate}
+
+The successful Particle Filter implementation validates the theoretical foundations taught in ELEC-E8740 and provides practical experience with real-world sensor fusion challenges. The system achieves robust, accurate localization suitable for autonomous navigation tasks.
+
+%----------------------------------------------------------------------------------------
+%	REFERENCES
+%----------------------------------------------------------------------------------------
+
+\section{References}
+
+\begin{enumerate}
+    \item Course lecture materials: ELEC-E8740 Basics of Sensor Fusion, Aalto University, Fall 2025
+    \item Project guide: \textit{Tracking of an Autonomous Robot}, Fatemeh Yaghoobi, October 2025
+    \item Särkkä, S. (2013). \textit{Bayesian Filtering and Smoothing}. Cambridge University Press
+    \item Thrun, S., Burgard, W., \& Fox, D. (2005). \textit{Probabilistic Robotics}. MIT Press
+    \item Simon, D. (2006). \textit{Optimal State Estimation: Kalman, $H_\infty$, and Nonlinear Approaches}. Wiley
+\end{enumerate}
+
+%----------------------------------------------------------------------------------------
+%	APPENDIX
+%----------------------------------------------------------------------------------------
+
+\appendix
+\section{Summary of Calibration Parameters}
+
+\begin{table}[H]
+\centering
+\caption{Complete Calibration Parameters Summary}
+\begin{tabular}{llc}
+\toprule
+\textbf{Sensor} & \textbf{Parameter} & \textbf{Value} \\
+\midrule
+\multirow{6}{*}{Gyroscope} & Bias X & $-0.0324$ deg/s \\
+ & Bias Y & $-0.2039$ deg/s \\
+ & Bias Z & $0.1873$ deg/s \\
+ & Variance X & $0.0414$ (deg/s)$^2$ \\
+ & Variance Y & $0.0477$ (deg/s)$^2$ \\
+ & Variance Z & $0.0756$ (deg/s)$^2$ \\
+\midrule
+\multirow{6}{*}{Accelerometer} & Gain $k_x$ & $0.9975$ \\
+ & Gain $k_y$ & $0.9929$ \\
+ & Gain $k_z$ & $0.9961$ \\
+ & Bias $b_x$ & $0.0136$ g \\
+ & Bias $b_y$ & $-0.0042$ g \\
+ & Bias $b_z$ & $0.0193$ g \\
+\midrule
+\multirow{3}{*}{Camera} & Focal length $f$ & $524.72$ pixels \\
+ & Distance bias $b$ & $3.42$ cm \\
+ & $R^2$ & $0.9997$ \\
+\midrule
+\multirow{2}{*}{Motor} & Speed (30\% PWM) & $6.23$ cm/s \\
+ & Est. full speed & $20.77$ cm/s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Particle Filter Parameters}
+
+\begin{table}[H]
+\centering
+\caption{Final Particle Filter Parameters}
+\begin{tabular}{llc}
+\toprule
+\textbf{Category} & \textbf{Parameter} & \textbf{Value} \\
+\midrule
+\multirow{2}{*}{Filter Configuration} & Number of particles $N$ & 2000 \\
+ & Resampling threshold & 1000 \\
+\midrule
+\multirow{2}{*}{Process Noise} & $\sigma_v$ & $2.0$ cm/s \\
+ & $\sigma_\omega$ & $5.0$ deg/s \\
+\midrule
+\multirow{2}{*}{Measurement Noise} & $\sigma_h$ & $2.0$ pixels \\
+ & $\sigma_{C_x}$ & $3.0$ pixels \\
+\midrule
+\multirow{3}{*}{Initial Conditions} & $p_x(0)$ & $43$ cm \\
+ & $p_y(0)$ & $18$ cm \\
+ & $\phi(0)$ & $0°$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
